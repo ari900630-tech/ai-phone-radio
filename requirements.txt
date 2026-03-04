@@ -1,1 +1,6 @@
-
+flask
+python-telegram-bot
+yt-dlp
+twilio
+requests
+gunicorn
