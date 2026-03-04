@@ -19,7 +19,7 @@ def get_yt_link(query):
         'default_search': 'ytsearch1',
         'noplaylist': True,
         'nocheckcertificate': True,
-        'extract_flat': 'in_playlist',
+        'extract_flat': True,
         'skip_download': True,
         'source_address': '0.0.0.0'
     }
@@ -37,15 +37,23 @@ def get_yt_link(query):
 @app.route('/voice', methods=['POST', 'GET'])
 def voice():
     digits = request.values.get('Digits', '')
-    logger.info(f"Received Digits: {digits}")
-
-    artist = random.choice(ARTISTS)
-    link, title = get_yt_link(artist)
-
-    if link:
-        response_text = f"id_v_m=t-מנגן את {artist}. 1 להחלפה. 2 ללייק..playfile={link}"
+    
+    # אם המשתמש רק נכנס או רוצה שיר הבא
+    if digits == '1' or not digits:
+        artist = random.choice(ARTISTS)
+        link, title = get_yt_link(artist)
+        
+        if link:
+            response_text = f"id_v_m=t-מנגן את {artist}. 1 להחלפה. 2 ללייק..playfile={link}"
+        else:
+            response_text = "id_v_m=t-מנסה למצוא שיר אחר.go_to_folder=/1"
+    
+    # אם המשתמש עשה לייק
+    elif digits == '2':
+        response_text = "id_v_m=t-תודה על הלייק. להמשך הקש 1."
+    
     else:
-        response_text = "id_v_m=t-מנסה שוב.go_to_folder=/1"
+        response_text = "go_to_folder=/1"
 
     response = make_response(response_text)
     response.headers["Content-Type"] = "text/plain; charset=utf-8"
@@ -56,4 +64,5 @@ def home():
     return "OK"
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
