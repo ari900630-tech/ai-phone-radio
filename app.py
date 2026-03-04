@@ -3,37 +3,53 @@ import threading
 import asyncio
 import requests
 import logging
-from flask import Flask
+from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 import yt_dlp
-from twilio.twiml.voice_response import VoiceResponse
 
-# הגדרת לוגים - כדי שנראה ב-Railway מה קורה
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# הגדרת לוגים - כדי שנוכל לראות ב-Railway אם יש בעיות
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# שליפת מפתחות
+# שליפת מפתחות מהגדרות המערכת
+# הטוקן של טלגרם שכבר נתת לי קודם
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '8655667831:AAEVUMmUocURtWKYj8Y9qrM1FpgErlRzz3w')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+# המפתח של גוגל ששלחת עכשיו
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AIzaSyDKYdB11968jqroePgfJe0IuDF2PntIyDQ')
 
-# מצב המערכת
+# משתנה לשמירת השיר שנבחר בטלגרם
 radio_state = {"url": None, "title": "לא נבחר שיר"}
 
-def ai_identify_song(text):
-    if not GEMINI_API_KEY: return text
+def ai_process_song(text):
+    """שימוש בבינה מלאכותית להבנת שם השיר"""
+    if not GEMINI_API_KEY:
+        logger.warning("Missing Gemini API Key!")
+        return text
+    
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={GEMINI_API_KEY}"
+    prompt = f"Identify the song: '{text}'. Return ONLY 'Artist - Song Name' in Hebrew or English."
+    
     try:
-        res = requests.post(url, json={"contents": [{"parts": [{"text": f"Identify song: {text}. Return ONLY 'Artist - Name'"}]}]}, timeout=10).json()
-        return res['candidates'][0]['content']['parts'][0]['text'].strip()
+        res = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=10).json()
+        ai_suggestion = res['candidates'][0]['content']['parts'][0]['text'].strip()
+        logger.info(f"AI interpreted: {ai_suggestion}")
+        return ai_suggestion
     except Exception as e:
         logger.error(f"AI Error: {e}")
         return text
 
-def get_audio_url(query):
-    ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'default_search': 'ytsearch', 'nocheckcertificate': True}
+def get_audio_from_youtube(query):
+    """חיפוש ביוטיוב ושליפת לינק להזרמה"""
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'quiet': True,
+        'default_search': 'ytsearch1',
+        'nocheckcertificate': True,
+        'noplaylist': True
+    }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(f"ytsearch1:{query}", download=False)['entries'][0]
@@ -43,50 +59,49 @@ def get_audio_url(query):
             return None, None
 
 # --- בוט טלגרם ---
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
-    logger.info(f"Received message: {user_text}")
-    m = await update.message.reply_text(f"🤖 ה-AI מנתח: {user_text}...")
+    logger.info(f"Telegram user requested: {user_text}")
     
-    refined = ai_identify_song(user_text)
-    url, title = get_audio_url(refined)
+    status_msg = await update.message.reply_text(f"🤖 ה-AI מנתח את הבקשה: {user_text}...")
+    
+    refined = ai_process_song(user_text)
+    url, title = get_audio_from_youtube(refined)
     
     if url:
         radio_state.update({"url": url, "title": title})
-        await m.edit_text(f"✅ השיר מוכן!\n🎵 *{title}*\n\nחייג כעת ל-077-5558794.")
+        await status_msg.edit_text(f"✅ השיר מוכן!\n🎵 *{title}*\n\nחייג כעת ל-074-7954941 והקש 1.")
     else:
-        await m.edit_text("❌ לא מצאתי את השיר. נסה שוב.")
+        await status_msg.edit_text("❌ לא מצאתי את השיר. נסה שוב.")
 
-def run_bot():
-    logger.info("Starting Telegram Bot...")
+def start_telegram_bot():
+    """הפעלת הבוט ב-Thread נפרד"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-        application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-        application.run_polling(drop_pending_updates=True)
+        bot = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+        bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_telegram_message))
+        bot.run_polling(drop_pending_updates=True)
     except Exception as e:
         logger.error(f"Bot Crash: {e}")
 
-# --- שרת WEB ---
-@app.route('/voice', methods=['POST'])
-def voice():
-    resp = VoiceResponse()
+# --- ממשק ימות המשיח ---
+@app.route('/voice', methods=['POST', 'GET'])
+def voice_api():
+    """הנתיב שאליו ימות המשיח פונים"""
     if radio_state["url"]:
-        resp.say(f"מנגן כעת את {radio_state['title']}.", language='he-IL')
-        resp.play(radio_state["url"])
+        # פקודה לימות המשיח להשמיע את השם ולנגן את הקובץ
+        return f"id_v_m=t-מנגן כעת את {radio_state['title']}.playfile={radio_state['url']}"
     else:
-        resp.say("שלום. לא בחרת שיר בטלגרם. אנא שלח שיר ונסה שוב.", language='he-IL')
-    return str(resp)
+        return "id_v_m=t-שלום. עדיין לא בחרת שיר בטלגרם. אנא שלח שם שיר לבוט ונסה שוב."
 
 @app.route('/')
 def health():
-    return "Server is LIVE"
+    return f"AI Radio is LIVE. Current Song: {radio_state['title']}"
 
 if __name__ == "__main__":
-    # הפעלת הבוט בנפרד
-    threading.Thread(target=run_bot, daemon=True).start()
-    # הרצת השרת
+    # הפעלת הבוט
+    threading.Thread(target=start_telegram_bot, daemon=True).start()
+    # הפעלת שרת ה-Web
     port = int(os.environ.get("PORT", 8080))
-    logger.info(f"Starting Flask on port {port}")
     app.run(host='0.0.0.0', port=port)
